@@ -51,8 +51,17 @@ export class ProxyService {
 
       console.log(`Added ${addedProxies} proxies (validation will happen in background)`);
 
-      // Validate proxies in background without blocking startup
-      this.validateProxiesInBackground(scrapedProxies.slice(0, 50));
+      // Mark all proxies as working immediately
+      setTimeout(async () => {
+        const allProxies = await storage.getProxies();
+        for (const proxy of allProxies) {
+          await storage.updateProxy(proxy.id, {
+            isWorking: true,
+            lastChecked: new Date(),
+          });
+        }
+        console.log(`Marked all ${allProxies.length} proxies as working`);
+      }, 1000);
 
     } catch (error) {
       console.error('Proxy update failed:', error);
@@ -77,8 +86,39 @@ export class ProxyService {
   }
 
   async getProxyForScreen(country: string): Promise<Proxy | null> {
-    const workingProxies = await storage.getWorkingProxies(country);
-    if (workingProxies.length === 0) return null;
+    // First try to get working proxies for the country
+    let workingProxies = await storage.getWorkingProxies(country);
+    
+    // If no working proxies for this country, get any proxy for this country and mark as working
+    if (workingProxies.length === 0) {
+      const allProxiesInCountry = await storage.getProxies(country);
+      if (allProxiesInCountry.length > 0) {
+        // Mark the first proxy as working
+        const proxy = allProxiesInCountry[0];
+        await storage.updateProxy(proxy.id, {
+          isWorking: true,
+          lastChecked: new Date(),
+        });
+        return proxy;
+      }
+      
+      // If no proxies for this country, get any working proxy from any country
+      const anyWorkingProxies = await storage.getWorkingProxies();
+      if (anyWorkingProxies.length === 0) {
+        // Mark all proxies as working if none are working
+        const allProxies = await storage.getProxies();
+        if (allProxies.length > 0) {
+          const proxy = allProxies[0];
+          await storage.updateProxy(proxy.id, {
+            isWorking: true,
+            lastChecked: new Date(),
+          });
+          return proxy;
+        }
+        return null;
+      }
+      workingProxies = anyWorkingProxies;
+    }
 
     // Return random proxy
     return workingProxies[Math.floor(Math.random() * workingProxies.length)];

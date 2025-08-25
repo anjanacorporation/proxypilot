@@ -38,7 +38,10 @@ export default function Sidebar({ onClose }: SidebarProps = {}) {
         throw new Error("Please select location and enter target URL");
       }
 
-      // Create screen sessions for 10 screens
+      // First clear any existing screen sessions
+      await apiRequest("DELETE", "/api/screen-sessions");
+
+      // Create screen sessions for exactly 10 screens
       const promises = Array.from({ length: 10 }, (_, index) =>
         apiRequest("POST", "/api/screen-sessions", {
           screenNumber: index + 1,

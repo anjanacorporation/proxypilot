@@ -113,6 +113,23 @@ export class MemStorage implements IStorage {
   }
 
   async createScreenSession(insertSession: InsertScreenSession): Promise<ScreenSession> {
+    // Check if a session with this screen number already exists
+    for (const [existingId, existingSession] of this.screenSessions) {
+      if (existingSession.screenNumber === insertSession.screenNumber) {
+        // Update existing session instead of creating duplicate
+        const updatedSession: ScreenSession = {
+          ...existingSession,
+          ...insertSession,
+          id: existingId, // Keep the existing ID
+          createdAt: existingSession.createdAt, // Keep original creation time
+          lastRefresh: new Date(),
+        };
+        this.screenSessions.set(existingId, updatedSession);
+        return updatedSession;
+      }
+    }
+
+    // Create new session if none exists with this screen number
     const id = randomUUID();
     const session: ScreenSession = {
       ...insertSession,

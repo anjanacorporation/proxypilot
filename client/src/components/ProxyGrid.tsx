@@ -100,7 +100,7 @@ export default function ProxyGrid() {
             Array.from({ length: 10 - screenSessions.length }, (_, index) => (
               <div
                 key={`empty-${index}`}
-                className="bg-dark-800 rounded-lg border border-dashed border-dark-600 aspect-[16/9] min-h-[300px] md:min-h-[400px] flex items-center justify-center"
+                className="bg-dark-800 rounded-lg border border-dashed border-dark-600 aspect-[16/9] min-h-[600px] md:min-h-[440px] flex items-center justify-center"
                 data-testid={`empty-screen-${screenSessions.length + index + 1}`}
               >
                 <div className="text-center">

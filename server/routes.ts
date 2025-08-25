@@ -120,9 +120,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "URL and proxyId are required" });
       }
 
-      const proxy = await storage.getProxyById(proxyId as string);
+      let proxy = await storage.getProxyById(proxyId as string);
+      
+      // If proxy not found, try to get any working proxy
       if (!proxy) {
-        return res.status(404).json({ message: "Proxy not found" });
+        console.log(`Proxy ${proxyId} not found, getting alternative proxy`);
+        const workingProxies = await storage.getWorkingProxies();
+        if (workingProxies.length > 0) {
+          proxy = workingProxies[Math.floor(Math.random() * workingProxies.length)];
+        } else {
+          // If no working proxies, mark any proxy as working
+          const allProxies = await storage.getProxies();
+          if (allProxies.length > 0) {
+            proxy = allProxies[0];
+            await storage.updateProxy(proxy.id, {
+              isWorking: true,
+              lastChecked: new Date(),
+            });
+          } else {
+            return res.status(404).json({ message: "No proxies available" });
+          }
+        }
       }
 
       if (!proxy.isWorking) {

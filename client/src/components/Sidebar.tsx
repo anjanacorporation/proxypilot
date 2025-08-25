@@ -142,7 +142,14 @@ export default function Sidebar() {
               type="url"
               placeholder="https://example.com"
               value={config.targetUrl}
-              onChange={(e) => setConfig({ ...config, targetUrl: e.target.value })}
+              onChange={(e) => {
+                let url = e.target.value;
+                // Auto-add https:// if not present
+                if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
+                  url = 'https://' + url;
+                }
+                setConfig({ ...config, targetUrl: url });
+              }}
               className="bg-dark-700 border-dark-600 text-white placeholder-gray-500"
               data-testid="input-target-url"
             />

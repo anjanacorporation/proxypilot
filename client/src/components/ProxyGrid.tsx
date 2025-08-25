@@ -84,7 +84,7 @@ export default function ProxyGrid() {
       ) : (
         <div className={`h-[calc(100vh-180px)] md:h-[calc(100vh-200px)] overflow-y-auto ${
           viewMode === 'grid' 
-            ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 md:gap-4' 
+            ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6' 
             : 'space-y-3 md:space-y-4'
         }`}>
           {screenSessions.map((session) => (
@@ -100,7 +100,7 @@ export default function ProxyGrid() {
             Array.from({ length: 10 - screenSessions.length }, (_, index) => (
               <div
                 key={`empty-${index}`}
-                className="bg-dark-800 rounded-lg border border-dashed border-dark-600 aspect-[16/10] flex items-center justify-center"
+                className="bg-dark-800 rounded-lg border border-dashed border-dark-600 aspect-[16/9] min-h-[200px] md:min-h-[250px] flex items-center justify-center"
                 data-testid={`empty-screen-${screenSessions.length + index + 1}`}
               >
                 <div className="text-center">

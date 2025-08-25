@@ -136,7 +136,7 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
       </div>
 
       {/* Content Area */}
-      <div className="aspect-[16/9] bg-gray-900 relative min-h-[200px] md:min-h-[250px]">
+      <div className="aspect-[16/9] bg-gray-900 relative min-h-[300px] md:min-h-[400px]">
         {session.isActive && proxy?.isWorking ? (
           <iframe
             src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&proxyId=${session.proxyId}`}

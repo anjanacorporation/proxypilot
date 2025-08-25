@@ -1,0 +1,53 @@
+🔹 Final Super Prompt (Website + App + Auto Proxy Update)
+
+"Mujhe ek full-stack project banana hai jisme ek website aur desktop app (ElectronJS) dono version bane. Project ka requirement yeh hai:
+
+🔹 Features
+
+Location Selection – User ek dropdown se country select kare (USA, Canada, Australia).
+
+URL Input – User koi bhi URL enter kar sake.
+
+Refresh Time – User ek dropdown se refresh interval select kare (15 sec, 30 sec, 60 sec).
+
+10 Screens Grid – Jab user "Start" button dabaye, tab ek grid (10 screens/iframes) khul jaye jisme har ek screen me wahi URL load ho jo user ne diya hai.
+
+Proxy Handling – Har screen ka request backend ke through jaye aur backend randomly free proxies (USA, Canada, Australia ke list) use karke webpage ko fetch kare aur frontend ko dikhaye.
+
+Auto Proxy Update – Backend me ek background job ho jo har 5-10 minute me free proxy websites (jaise proxyscrape.com, free-proxy-list.net, spys.one) se proxies scrape kare, aur working proxies ko automatically filter karke system me update kare.
+
+Auto Refresh – Har screen apne selected interval ke हिसाब से refresh ho jaye.
+
+Backend – Node.js + Express + http-proxy-middleware (or Flask alternative).
+
+Frontend (Website) – React.js (clean UI) ya simple HTML/JS.
+
+Desktop App – Website ko ElectronJS ke through ek cross-platform desktop app (Windows/Mac/Linux) banaya jaye.
+
+App Download from Website – Website ke home page me ek “Download App” button ho jisme se user Electron build (.exe for Windows, .dmg for Mac, .AppImage for Linux) download kar sake.
+
+Mobile App (Optional) – React Native me ek WebView app ban jaye jo isi website ko mobile pe run kar sake.
+
+🔹 Project Structure
+project/
+ ├── backend/ (Express server, proxy handling + auto proxy scraper)
+ ├── frontend/ (React/HTML frontend with 10 screen grid)
+ ├── electron-app/ (Electron wrapper for desktop app + build scripts)
+ ├── downloads/ (App builds .exe/.dmg/.AppImage served via website)
+ └── mobile-app/ (React Native WebView - optional)
+
+🔹 Output Requirement
+
+Ek working project mile jisme backend + frontend + electron wrapper ho.
+
+User jab location select kare, URL de, aur time interval set kare → tab 10 screens me woh URL proxy ke through open ho aur auto-refresh hota rahe.
+
+Backend me auto proxy updater ho jo free proxy sites scrape karke new proxies add kare.
+
+Desktop version Electron ke through build ho jaye.
+
+Mobile version React Native ke WebView ke through ho jaye.
+
+Website ke Download App button se user desktop app (.exe/.dmg/.AppImage) download kar sake.
+
+"Please mujhe iska full ready-to-run code do with step-by-step setup guide."

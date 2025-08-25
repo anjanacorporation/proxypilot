@@ -71,34 +71,36 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
 
   if (viewMode === 'list') {
     return (
-      <div className="bg-dark-800 rounded-lg border border-dark-700 p-4 flex items-center space-x-4" data-testid={`screen-card-${session.screenNumber}`}>
-        <div className="flex items-center space-x-3">
+      <div className="bg-dark-800 rounded-lg border border-dark-700 p-3 md:p-4 flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4" data-testid={`screen-card-${session.screenNumber}`}>
+        <div className="flex items-center space-x-3 w-full sm:w-auto">
           <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
-          <span className="text-white font-medium">Screen {session.screenNumber}</span>
+          <span className="text-sm md:text-base text-white font-medium">Screen {session.screenNumber}</span>
         </div>
         
-        <div className="flex-1">
-          <p className="text-sm text-gray-300 truncate">{session.targetUrl}</p>
+        <div className="flex-1 w-full sm:w-auto">
+          <p className="text-xs md:text-sm text-gray-300 truncate">{session.targetUrl}</p>
         </div>
         
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center justify-between w-full sm:w-auto sm:space-x-2">
           <span className="text-xs text-gray-400">
             {getCountryFlag(session.country)} {proxy?.ip || 'Loading...'}
           </span>
-          <Badge variant="outline" className={`text-xs ${
-            session.isActive && proxy?.isWorking ? 'border-green-500/30 text-green-400' : 'border-red-500/30 text-red-400'
-          }`}>
-            {getStatusText()}
-          </Badge>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleRefresh}
-            disabled={refreshScreenMutation.isPending}
-            data-testid={`button-refresh-screen-${session.screenNumber}`}
-          >
-            <RotateCcw className={`w-3 h-3 ${refreshScreenMutation.isPending ? 'animate-spin' : ''}`} />
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Badge variant="outline" className={`text-xs ${
+              session.isActive && proxy?.isWorking ? 'border-green-500/30 text-green-400' : 'border-red-500/30 text-red-400'
+            }`}>
+              {getStatusText()}
+            </Badge>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleRefresh}
+              disabled={refreshScreenMutation.isPending}
+              data-testid={`button-refresh-screen-${session.screenNumber}`}
+            >
+              <RotateCcw className={`w-3 h-3 ${refreshScreenMutation.isPending ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -111,14 +113,14 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
         : 'border-red-500/50'
     }`} data-testid={`screen-card-${session.screenNumber}`}>
       {/* Header */}
-      <div className="px-3 py-2 bg-dark-700 border-b border-dark-600 flex items-center justify-between">
+      <div className="px-2 md:px-3 py-2 bg-dark-700 border-b border-dark-600 flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <div className={`w-2 h-2 rounded-full ${getStatusColor()} ${session.isActive ? 'animate-pulse' : ''}`} />
           <span className="text-xs text-gray-300">Screen {session.screenNumber}</span>
         </div>
         <div className="flex items-center space-x-1">
-          <span className="text-xs text-gray-400" data-testid={`proxy-info-${session.screenNumber}`}>
-            {proxy ? `${getCountryFlag(session.country)} ${proxy.ip}` : 'Loading...'}
+          <span className="text-xs text-gray-400 truncate max-w-20 md:max-w-none" data-testid={`proxy-info-${session.screenNumber}`}>
+            {proxy ? `${getCountryFlag(session.country)} ${proxy.ip.split('.')[0]}...` : 'Loading...'}
           </span>
           <Button
             size="sm"
@@ -134,7 +136,7 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
       </div>
 
       {/* Content Area */}
-      <div className="aspect-[16/10] bg-gray-900 relative">
+      <div className="aspect-[16/10] md:aspect-[16/10] bg-gray-900 relative">
         {session.isActive && proxy?.isWorking ? (
           <iframe
             src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&proxyId=${session.proxyId}`}

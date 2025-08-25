@@ -16,7 +16,11 @@ interface ProxyConfig {
   refreshInterval: number;
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export default function Sidebar({ onClose }: SidebarProps = {}) {
   const [config, setConfig] = useState<ProxyConfig>({
     location: "",
     targetUrl: "",
@@ -114,11 +118,29 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-80 bg-dark-800 border-r border-dark-700 p-6 overflow-y-auto" data-testid="sidebar">
+    <div className="w-80 md:w-80 bg-dark-800 border-r border-dark-700 p-4 md:p-6 overflow-y-auto" data-testid="sidebar">
+      {/* Mobile Close Button */}
+      {onClose && (
+        <div className="flex justify-between items-center mb-4 md:hidden">
+          <h2 className="text-lg font-semibold text-white">Configuration</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="text-gray-400 hover:text-white"
+            data-testid="button-close-sidebar"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </Button>
+        </div>
+      )}
+      
       <div className="space-y-6">
         {/* Configuration Panel */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-4">Configuration</h2>
+          <h2 className="text-lg font-semibold text-white mb-4 hidden md:block">Configuration</h2>
           
           {/* Location Selection */}
           <div className="space-y-2">

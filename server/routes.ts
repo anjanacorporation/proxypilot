@@ -280,7 +280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Then any other working proxy not yet tried (prefer same country)
       const working = await storage.getWorkingProxies();
-      const base = await getBaseProxy();
+      const baseProxy = base;
       // Prefer proxies recently checked to increase success odds
       const now = Date.now();
       const freshCutoff = now - 2 * 60 * 1000; // 2 minutes
@@ -297,7 +297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const brt = (b.responseTime ?? 999999);
           return art - brt;
         });
-      const countryToMatch = (targetCountry || base?.country);
+      const countryToMatch = (targetCountry || baseProxy?.country);
       if (countryToMatch && tier1.has(countryToMatch)) {
         candidates = candidates.filter(p => p.country === countryToMatch);
       } else if (countryToMatch) {

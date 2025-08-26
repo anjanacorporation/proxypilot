@@ -62,7 +62,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="flex flex-col md:flex-row h-[calc(100vh-65px)] md:h-[calc(100vh-73px)]">
+      <div className="flex flex-col md:flex-row min-h-screen">
         {/* Mobile Sidebar Overlay */}
         {showSidebar && (
           <div 

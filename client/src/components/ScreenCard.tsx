@@ -16,9 +16,15 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
   const queryClient = useQueryClient();
 
   // Get proxy info
-  const { data: proxy } = useQuery<Proxy>({
+  const { data: proxy, isLoading: proxyLoading, isError: proxyError } = useQuery<Proxy>({
     queryKey: ["/api/proxies", session.proxyId],
+    queryFn: async () => {
+      if (!session.proxyId) throw new Error("No proxyId");
+      const res = await apiRequest("GET", `/api/proxies/${session.proxyId}`);
+      return res.json();
+    },
     enabled: !!session.proxyId,
+    staleTime: 10_000,
   });
 
   // Auto-refresh logic
@@ -52,18 +58,25 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
       case 'usa': return '🇺🇸';
       case 'canada': return '🇨🇦';
       case 'australia': return '🇦🇺';
+      case 'uk': return '🇬🇧';
+      case 'germany': return '🇩🇪';
+      case 'france': return '🇫🇷';
+      case 'netherlands': return '🇳🇱';
       default: return '🌍';
     }
   };
 
   const getStatusColor = () => {
     if (!session.isActive) return 'bg-gray-500';
-    if (!proxy || !proxy.isWorking) return 'bg-red-500';
+    if (proxyLoading) return 'bg-yellow-500';
+    if (proxyError || !proxy || !proxy.isWorking) return 'bg-red-500';
     return 'bg-green-500';
   };
 
   const getStatusText = () => {
     if (!session.isActive) return 'Inactive';
+    if (proxyLoading) return 'Loading Proxy';
+    if (proxyError) return 'Proxy Error';
     if (!proxy) return 'No Proxy';
     if (!proxy.isWorking) return 'Connection Failed';
     return 'Live';
@@ -71,7 +84,7 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
 
   if (viewMode === 'list') {
     return (
-      <div className="bg-dark-800 rounded-lg border border-dark-700 p-3 md:p-4 flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4" data-testid={`screen-card-${session.screenNumber}`}>
+      <div className="bg-dark-800 rounded-lg border border-dark-700 p-5 md:p-6 flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-5 min-h-[240px] md:min-h-[280px]" data-testid={`screen-card-${session.screenNumber}`}>
         <div className="flex items-center space-x-3 w-full sm:w-auto">
           <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
           <span className="text-sm md:text-base text-white font-medium">Screen {session.screenNumber}</span>
@@ -113,14 +126,18 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
         : 'border-red-500/50'
     }`} data-testid={`screen-card-${session.screenNumber}`}>
       {/* Header */}
-      <div className="px-2 md:px-3 py-2 bg-dark-700 border-b border-dark-600 flex items-center justify-between">
+      <div className="px-3 md:px-4 py-2.5 md:py-3 bg-dark-700 border-b border-dark-600 flex items-center justify-between min-h-[60px]">
         <div className="flex items-center space-x-2">
           <div className={`w-2 h-2 rounded-full ${getStatusColor()} ${session.isActive ? 'animate-pulse' : ''}`} />
           <span className="text-xs text-gray-300">Screen {session.screenNumber}</span>
         </div>
         <div className="flex items-center space-x-1">
-          <span className="text-xs text-gray-400 truncate max-w-20 md:max-w-none" data-testid={`proxy-info-${session.screenNumber}`}>
-            {proxy ? `${getCountryFlag(session.country)} ${proxy.ip.split('.')[0]}...` : 'Loading...'}
+          <span 
+            className="text-sm text-gray-300 truncate max-w-[140px] md:max-w-[220px] xl:max-w-none" 
+            data-testid={`proxy-info-${session.screenNumber}`}
+            title={proxy ? `${session.country?.toUpperCase() || ''} ${proxy.ip}` : ''}
+          >
+            {proxy ? `${getCountryFlag(session.country)} ${proxy.ip}` : 'Loading...'}
           </span>
           <Button
             size="sm"
@@ -135,57 +152,30 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="aspect-[16/9] bg-gray-900 relative min-h-[600px] md:min-h-[440px]">
-        {session.isActive && proxy?.isWorking ? (
-          <iframe
-            src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&proxyId=${session.proxyId}`}
-            className="w-full h-full"
-            title={`Screen ${session.screenNumber}`}
-            sandbox="allow-same-origin allow-scripts"
-            data-testid={`iframe-screen-${session.screenNumber}`}
-          />
-        ) : session.isActive && !proxy ? (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="text-center">
-              <Loader2 className="w-6 h-6 text-amber-400 animate-spin mb-2 mx-auto" />
-              <p className="text-sm text-gray-400">Connecting to proxy...</p>
-            </div>
+      {/* Content Area (only when live) */}
+      {session.isActive && proxy?.isWorking && (
+        <div className="relative bg-transparent">
+          {/* Mobile scale wrapper to mimic desktop layout and reduce text size */}
+          <div className="transform origin-top-left scale-[0.85] sm:scale-100 w-[118%] sm:w-full">
+            <iframe
+              src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&sessionId=${session.id}`}
+              className="w-full h-[28vh] sm:h-[24vh] md:h-[20vh] xl:h-[25vh]"
+              title={`Screen ${session.screenNumber}`}
+              sandbox="allow-same-origin allow-scripts"
+              data-testid={`iframe-screen-${session.screenNumber}`}
+            />
           </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="text-center">
-              <AlertTriangle className="w-6 h-6 text-red-400 mb-2 mx-auto" />
-              <p className="text-sm text-gray-400">
-                {!session.isActive ? 'Screen inactive' : 'Proxy connection failed'}
-              </p>
-              <Button
-                size="sm"
-                variant="link"
-                onClick={handleRefresh}
-                className="text-xs text-blue-400 hover:text-blue-300 mt-1 h-auto p-0"
-                data-testid={`button-retry-screen-${session.screenNumber}`}
-              >
-                Retry
-              </Button>
-            </div>
+          {/* Status Badge */}
+          <div className="absolute top-2 right-2">
+            <Badge 
+              variant="secondary" 
+              className="text-xs bg-black/50 text-white"
+            >
+              {getStatusText()}
+            </Badge>
           </div>
-        )}
-        
-        {/* Status Badge */}
-        <div className="absolute top-2 right-2">
-          <Badge 
-            variant="secondary" 
-            className={`text-xs ${
-              session.isActive && proxy?.isWorking 
-                ? 'bg-black/50 text-white' 
-                : 'bg-red-500/80 text-white'
-            }`}
-          >
-            {getStatusText()}
-          </Badge>
         </div>
-      </div>
+      )}
     </div>
   );
 }

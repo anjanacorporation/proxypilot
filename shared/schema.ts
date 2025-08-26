@@ -28,6 +28,7 @@ export const screenSessions = pgTable("screen_sessions", {
   country: text("country").notNull(),
   refreshInterval: integer("refresh_interval").notNull().default(30), // in seconds
   isActive: boolean("is_active").notNull().default(true),
+  friendly: boolean("friendly").notNull().default(true),
   lastRefresh: timestamp("last_refresh").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -52,6 +53,7 @@ export const proxyStatsSchema = z.object({
   total: z.number(),
   working: z.number(),
   byCountry: z.record(z.number()),
+  workingByCountry: z.record(z.number()).optional(),
   lastUpdated: z.string(),
 });
 

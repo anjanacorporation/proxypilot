@@ -5,6 +5,22 @@ import { proxyService } from "./services/proxyService";
 import { insertScreenSessionSchema } from "@shared/schema";
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+
+// Map proxy country to an Accept-Language header to improve geo-consistency
+function getAcceptLanguage(country?: string): string {
+  const c = (country || '').toLowerCase();
+  switch (c) {
+    case 'usa': return 'en-US,en;q=0.9';
+    case 'canada': return 'en-CA,en;q=0.8,fr-CA;q=0.6,fr;q=0.5';
+    case 'australia': return 'en-AU,en;q=0.9';
+    case 'uk': return 'en-GB,en;q=0.9';
+    case 'germany': return 'de-DE,de;q=0.9,en;q=0.6';
+    case 'france': return 'fr-FR,fr;q=0.9,en;q=0.6';
+    case 'netherlands': return 'nl-NL,nl;q=0.9,en;q=0.6';
+    default: return 'en-US,en;q=0.9';
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Start proxy auto-update service
@@ -17,6 +33,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error) {
       res.status(500).json({ message: "Failed to get proxy statistics" });
+    }
+  });
+
+  // Pick a single working proxy for a given country to pin across screens
+  app.get("/api/pick-proxy", async (req, res) => {
+    try {
+      const { country } = req.query as { country?: string };
+      if (!country) return res.status(400).json({ message: 'country is required' });
+      const proxy = await proxyService.getProxyForScreen(country);
+      if (!proxy) return res.status(404).json({ message: 'No proxy available' });
+      res.json({ proxyId: proxy.id, ip: proxy.ip, port: proxy.port, country: proxy.country });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to pick proxy' });
+    }
+  });
+
+  // List all proxies (for picking IDs to verify)
+  app.get("/api/proxies", async (_req, res) => {
+    try {
+      const proxies = await storage.getProxies();
+      res.json(proxies);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to list proxies" });
+    }
+  });
+
+  // Trigger verification of all proxies (automatic verify system)
+  app.post("/api/proxies/verify-all", async (_req, res) => {
+    try {
+      const result = await proxyService.verifyAllProxies();
+      res.json({ message: "Verification started/completed", ...result });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to verify proxies" });
+    }
+  });
+
+  // Diagnostic: verify a small random sample quickly
+  app.get("/api/proxies/verify-sample", async (req, res) => {
+    try {
+      const size = Math.max(1, Math.min(200, parseInt(String(req.query.size || '50'), 10) || 50));
+      const out = await proxyService.verifySample(size);
+      res.json(out);
+    } catch (error: any) {
+      res.status(500).json({ message: error?.message || 'Failed to run sample verification' });
+    }
+  });
+
+  // Verify what IP/geo the target will see through a given proxy
+  app.get("/api/proxy-verify", async (req, res) => {
+    try {
+      const { proxyId } = req.query as { proxyId?: string };
+      if (!proxyId) return res.status(400).json({ message: 'proxyId is required' });
+      const proxy = await storage.getProxyById(proxyId);
+      if (!proxy) return res.status(404).json({ message: 'Proxy not found' });
+
+      const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
+      const httpsAgent = new HttpsProxyAgent(proxyUrl);
+      // 1) Detect external IP via proxy
+      const ipResp = await axios.get('https://api.ipify.org?format=json', {
+        proxy: false,
+        httpsAgent,
+        timeout: 5000,
+      });
+      const detectedIp = ipResp.data?.ip as string | undefined;
+      if (!detectedIp) return res.status(502).json({ message: 'Could not detect IP via proxy' });
+
+      // 2) Geolocate detected IP (no need to use proxy for this)
+      const geoResp = await axios.get(`http://ip-api.com/json/${detectedIp}?fields=status,countryCode,query`, { timeout: 3000 });
+      const countryCode = geoResp.data?.countryCode || 'XX';
+
+      return res.json({
+        requestedProxy: { id: proxy.id, ip: proxy.ip, port: proxy.port, country: proxy.country },
+        detected: { ip: detectedIp, countryCode },
+      });
+    } catch (err: any) {
+      return res.status(500).json({ message: err?.message || 'Proxy verify failed' });
     }
   });
 
@@ -51,8 +143,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const validatedData = insertScreenSessionSchema.parse(req.body);
       
-      // Get a proxy for this session
-      const proxy = await proxyService.getProxyForScreen(validatedData.country);
+      // If client provided a proxyId, try to use it as-is when valid and working
+      let proxy: Awaited<ReturnType<typeof storage.getProxyById>> | null = null;
+      if (validatedData.proxyId) {
+        const p = await storage.getProxyById(validatedData.proxyId);
+        if (p && p.isWorking) {
+          proxy = p;
+        }
+      }
+      // Fallback to autodetect
+      if (!proxy) {
+        proxy = await proxyService.getProxyForScreen(validatedData.country);
+      }
       if (!proxy) {
         return res.status(400).json({ message: `No working proxies available for ${validatedData.country}` });
       }
@@ -111,104 +213,205 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Proxy endpoint for fetching web content through proxies
+  // Proxy endpoint for fetching web content through proxies (with in-request rotation)
   app.get("/api/proxy-fetch", async (req, res) => {
-    try {
-      const { url, proxyId } = req.query;
-      
-      if (!url || !proxyId) {
-        return res.status(400).json({ message: "URL and proxyId are required" });
-      }
-
-      let proxy = await storage.getProxyById(proxyId as string);
-      
-      // If proxy not found, try to get any working proxy
-      if (!proxy) {
-        console.log(`Proxy ${proxyId} not found, getting alternative proxy`);
-        const workingProxies = await storage.getWorkingProxies();
-        if (workingProxies.length > 0) {
-          proxy = workingProxies[Math.floor(Math.random() * workingProxies.length)];
-        } else {
-          // If no working proxies, mark any proxy as working
-          const allProxies = await storage.getProxies();
-          if (allProxies.length > 0) {
-            proxy = allProxies[0];
-            await storage.updateProxy(proxy.id, {
-              isWorking: true,
-              lastChecked: new Date(),
-            });
-          } else {
-            return res.status(404).json({ message: "No proxies available" });
-          }
-        }
-      }
-
-      if (!proxy.isWorking) {
-        return res.status(503).json({ message: "Proxy is not working" });
-      }
-
-      // Ensure URL has protocol
-      let targetUrl = url as string;
-      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-        targetUrl = 'https://' + targetUrl;
-      }
-
-      console.log(`Fetching ${targetUrl} through proxy ${proxy.ip}:${proxy.port}`);
-
-      const response = await axios.get(targetUrl, {
-        proxy: {
-          host: proxy.ip,
-          port: proxy.port,
-        },
-        timeout: 15000,
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-        }
-      });
-
-      // Set proper headers for iframe embedding
-      res.set({
-        'Content-Type': response.headers['content-type'] || 'text/html',
-        'X-Frame-Options': 'ALLOWALL',
-        'Content-Security-Policy': 'frame-ancestors *',
-      });
-
-      let htmlContent = response.data;
-      
-      // If it's HTML, modify it to work better in iframe
-      if (typeof htmlContent === 'string' && htmlContent.includes('<html')) {
-        // Add base tag to handle relative URLs
-        const baseUrl = new URL(targetUrl).origin;
-        htmlContent = htmlContent.replace(
-          '<head>',
-          `<head><base href="${baseUrl}/">`
-        );
-      }
-
-      res.send(htmlContent);
-    } catch (error: any) {
-      console.error('Proxy fetch error:', error.message);
-      
-      // Return a simple error page for iframe
-      const errorHtml = `
-        <html>
-          <body style="background: #1f2937; color: white; font-family: Arial; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
-            <div style="text-align: center;">
-              <h3>⚠️ Connection Failed</h3>
-              <p>Unable to load content through proxy</p>
-              <small>Error: ${error.message}</small>
-            </div>
-          </body>
-        </html>
-      `;
-      
-      res.status(500).set('Content-Type', 'text/html').send(errorHtml);
+    const { url, proxyId, sessionId } = req.query as { url?: string; proxyId?: string; sessionId?: string };
+    if (!url) {
+      return res.status(400).json({ message: "url is required" });
     }
+    if (!sessionId && !proxyId) {
+      return res.status(400).json({ message: "sessionId or proxyId is required" });
+    }
+
+    // Ensure URL has protocol
+    let targetUrl = url as string;
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      targetUrl = 'https://' + targetUrl;
+    }
+    // Enforce HTTPS-only: if user passed http://, upgrade to https://
+    if (targetUrl.startsWith('http://')) {
+      try {
+        const u = new URL(targetUrl);
+        u.protocol = 'https:';
+        targetUrl = u.toString();
+      } catch { /* if URL parse fails, leave as-is */ }
+    }
+
+    // Build a queue of proxies to try: requested one first, then other working ones
+    const tried = new Set<string>();
+    const maxAttempts = 5;
+
+    // Restrict to proxies likely to be HTTP and same country as the original when possible
+    const allowedPorts = new Set([80, 8080, 8081, 8082, 8000, 8888, 3128, 8118, 8811]);
+    const tier1 = new Set(['usa', 'canada', 'australia', 'uk', 'germany', 'france', 'netherlands']);
+    const getBaseProxy = async () => {
+      // Prefer session->proxyId from DB; fall back to query proxyId for backward compatibility
+      if (sessionId) {
+        const sess = await storage.getScreenSessionById(sessionId as string);
+        if (sess?.proxyId) {
+          const p = await storage.getProxyById(sess.proxyId);
+          if (p) return p;
+        }
+      }
+      if (proxyId) {
+        const p = await storage.getProxyById(proxyId as string);
+        if (p) return p;
+      }
+      return null;
+    };
+
+    const pickNextProxy = async () => {
+      // Prefer the currently pinned session proxy (DB) or provided proxyId first
+      const base = await getBaseProxy();
+      if (base && !tried.has(base.id)) {
+        return base;
+      }
+      // If sessionId present: try pinned, then rotate within same country
+      let targetCountry: string | undefined;
+      if (sessionId) {
+        const sess = await storage.getScreenSessionById(sessionId as string);
+        if (sess?.proxyId && !tried.has(sess.proxyId)) {
+          const pinned = await storage.getProxyById(sess.proxyId);
+          if (pinned) return pinned;
+          tried.add(sess.proxyId);
+        }
+        targetCountry = sess?.country;
+      }
+
+      // Then any other working proxy not yet tried (prefer same country)
+      const working = await storage.getWorkingProxies();
+      const base = await getBaseProxy();
+      // Prefer proxies recently checked to increase success odds
+      const now = Date.now();
+      const freshCutoff = now - 2 * 60 * 1000; // 2 minutes
+      let candidates = working
+        .filter(p => !tried.has(p.id) && allowedPorts.has(p.port))
+        .sort((a, b) => {
+          const at = new Date(a.lastChecked as any).getTime();
+          const bt = new Date(b.lastChecked as any).getTime();
+          const aFresh = at >= freshCutoff ? 1 : 0;
+          const bFresh = bt >= freshCutoff ? 1 : 0;
+          if (aFresh !== bFresh) return bFresh - aFresh; // fresher first
+          // then faster response time first (lower is better)
+          const art = (a.responseTime ?? 999999);
+          const brt = (b.responseTime ?? 999999);
+          return art - brt;
+        });
+      const countryToMatch = (targetCountry || base?.country);
+      if (countryToMatch && tier1.has(countryToMatch)) {
+        candidates = candidates.filter(p => p.country === countryToMatch);
+      } else if (countryToMatch) {
+        // Non-tier1 country: still match same country if possible
+        candidates = candidates.filter(p => p.country === countryToMatch);
+      } else {
+        // No country found: prefer Tier-1
+        candidates = candidates.filter(p => tier1.has(p.country));
+      }
+      if (candidates.length === 0) return null;
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    };
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const proxy = await pickNextProxy();
+      if (!proxy) break;
+      tried.add(proxy.id);
+
+      try {
+        const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
+        const agentOpts = { httpsAgent: new HttpsProxyAgent(proxyUrl) };
+        const acceptLanguage = getAcceptLanguage(proxy.country);
+        const startedAt = Date.now();
+        const response = await axios.get(targetUrl, {
+          proxy: false,
+          timeout: 10000,
+          maxRedirects: 5,
+          validateStatus: () => true,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': acceptLanguage,
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+          },
+          ...agentOpts,
+        });
+
+        // If upstream returns 5xx, rotate to another proxy; pass through 4xx to iframe
+        if (response.status >= 500) {
+          // server-side failure at target; try next proxy
+          continue;
+        }
+
+        // Success (including 4xx): proxy tunnel is functional; record metrics
+        try {
+          const rt = Math.max(1, Date.now() - startedAt);
+          await storage.updateProxy(proxy.id, { isWorking: true, lastChecked: new Date(), responseTime: rt });
+          await proxyService.noteSuccess(proxy.id);
+          // Log which DB proxy IP served this iframe load
+          console.log(`[proxy-fetch] SUCCESS sessionId=${sessionId || '-'} country=${proxy.country} proxyId=${proxy.id} ip=${proxy.ip} rt=${rt}ms url=${targetUrl}`);
+        } catch { /* ignore metric update errors */ }
+
+        // Success: if sessionId provided, unify all active sessions in same country to this proxy
+        if (sessionId) {
+          try {
+            const sess = await storage.getScreenSessionById(sessionId as string);
+            if (sess) {
+              const sessions = await storage.getScreenSessions();
+              const sameCountryActive = sessions.filter(s => s.isActive && s.country === sess.country);
+              await Promise.all(sameCountryActive.map(s =>
+                s.proxyId !== proxy.id ? storage.updateScreenSession(s.id, { proxyId: proxy.id }) : Promise.resolve(s)
+              ));
+            }
+          } catch { /* ignore session update errors */ }
+        }
+
+        res.set({
+          'Content-Type': response.headers['content-type'] || 'text/html',
+          'X-Frame-Options': 'ALLOWALL',
+          'Content-Security-Policy': 'frame-ancestors *',
+        });
+
+        let htmlContent = response.data;
+        if (typeof htmlContent === 'string' && htmlContent.includes('<html')) {
+          const baseUrl = new URL(targetUrl).origin;
+          htmlContent = htmlContent.replace(
+            '<head>',
+            `<head><base href="${baseUrl}/">`
+          );
+        }
+
+        return res.status(response.status || 200).send(htmlContent);
+      } catch (error: any) {
+        console.error('[proxy-fetch] ERROR', {
+          sessionId,
+          proxyId: proxy?.id,
+          country: proxy?.country,
+          ip: proxy?.ip,
+          error: error?.message || String(error)
+        });
+        // Mark this proxy as not working, continue to next
+        try {
+          await storage.updateProxy(proxy.id, { isWorking: false, lastChecked: new Date() });
+          // Record failure; may evict after threshold
+          await proxyService.noteFailure(proxy.id);
+        } catch {}
+        // next attempt
+      }
+    }
+
+    // All attempts failed
+    const errorHtml = `
+      <html>
+        <body style="background: #1f2937; color: white; font-family: Arial; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+          <div style="text-align: center;">
+            <h3>⚠️ Connection Failed</h3>
+            <p>Unable to load content through any proxy</p>
+            <small>All attempts timed out or were refused</small>
+          </div>
+        </body>
+      </html>
+    `;
+    return res.status(500).set('Content-Type', 'text/html').send(errorHtml);
   });
 
   // Force proxy update

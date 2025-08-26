@@ -1,5 +1,7 @@
-import { type User, type InsertUser, type Proxy, type InsertProxy, type ScreenSession, type InsertScreenSession } from "@shared/schema";
+import { type User, type InsertUser, type Proxy, type InsertProxy, type ScreenSession, type InsertScreenSession, users, proxies, screenSessions } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { db } from './db';
+import { and, desc, eq } from 'drizzle-orm';
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -17,6 +19,7 @@ export interface IStorage {
   
   // Screen session management
   getScreenSessions(): Promise<ScreenSession[]>;
+  getScreenSessionById(id: string): Promise<ScreenSession | undefined>;
   getScreenSession(screenNumber: number): Promise<ScreenSession | undefined>;
   createScreenSession(session: InsertScreenSession): Promise<ScreenSession>;
   updateScreenSession(id: string, updates: Partial<ScreenSession>): Promise<ScreenSession | undefined>;
@@ -75,7 +78,8 @@ export class MemStorage implements IStorage {
     const proxy: Proxy = {
       ...insertProxy,
       id,
-      isWorking: insertProxy.isWorking ?? true,
+      // Default to not working until verified via HTTPS-only checks
+      isWorking: insertProxy.isWorking ?? false,
       responseTime: insertProxy.responseTime ?? null,
       createdAt: new Date(),
       lastChecked: new Date(),
@@ -106,6 +110,10 @@ export class MemStorage implements IStorage {
     return Array.from(this.screenSessions.values());
   }
 
+  async getScreenSessionById(id: string): Promise<ScreenSession | undefined> {
+    return this.screenSessions.get(id);
+  }
+
   async getScreenSession(screenNumber: number): Promise<ScreenSession | undefined> {
     return Array.from(this.screenSessions.values()).find(
       session => session.screenNumber === screenNumber
@@ -114,7 +122,7 @@ export class MemStorage implements IStorage {
 
   async createScreenSession(insertSession: InsertScreenSession): Promise<ScreenSession> {
     // Check if a session with this screen number already exists
-    for (const [existingId, existingSession] of this.screenSessions) {
+    for (const [existingId, existingSession] of Array.from(this.screenSessions.entries())) {
       if (existingSession.screenNumber === insertSession.screenNumber) {
         // Update existing session instead of creating duplicate
         const updatedSession: ScreenSession = {
@@ -137,6 +145,7 @@ export class MemStorage implements IStorage {
       proxyId: insertSession.proxyId ?? null,
       refreshInterval: insertSession.refreshInterval ?? 30,
       isActive: insertSession.isActive ?? true,
+      friendly: (insertSession as any).friendly ?? true,
       createdAt: new Date(),
       lastRefresh: new Date(),
     };
@@ -162,4 +171,142 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Database-backed storage using Drizzle (Supabase/Postgres)
+export class DbStorage implements IStorage {
+  async getUser(id: string): Promise<User | undefined> {
+    if (!db) return undefined;
+    const rows = await db.select().from(users).where(eq(users.id, id));
+    return rows[0];
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    if (!db) return undefined;
+    const rows = await db.select().from(users).where(eq(users.username, username));
+    return rows[0];
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    if (!db) throw new Error('DB not configured');
+    const rows = await db.insert(users).values(user).returning();
+    return rows[0];
+  }
+
+  // Proxy management
+  async getProxies(country?: string): Promise<Proxy[]> {
+    if (!db) return [];
+    if (country) {
+      return await db.select().from(proxies).where(eq(proxies.country, country));
+    }
+    return await db.select().from(proxies);
+  }
+
+  async getWorkingProxies(country?: string): Promise<Proxy[]> {
+    if (!db) return [];
+    const base = eq(proxies.isWorking, true);
+    if (country) {
+      return await db.select().from(proxies).where(and(base, eq(proxies.country, country))).orderBy(desc(proxies.lastChecked));
+    }
+    return await db.select().from(proxies).where(base).orderBy(desc(proxies.lastChecked));
+  }
+
+  async getProxyById(id: string): Promise<Proxy | undefined> {
+    if (!db) return undefined;
+    const rows = await db.select().from(proxies).where(eq(proxies.id, id));
+    return rows[0];
+  }
+
+  async createProxy(insertProxy: InsertProxy): Promise<Proxy> {
+    if (!db) throw new Error('DB not configured');
+    const row = {
+      ...insertProxy,
+      id: randomUUID(),
+      isWorking: insertProxy.isWorking ?? false,
+      responseTime: insertProxy.responseTime ?? null,
+      lastChecked: new Date(),
+      createdAt: new Date(),
+    } as any;
+    const rows = await db.insert(proxies).values(row).returning();
+    return rows[0];
+  }
+
+  async updateProxy(id: string, updates: Partial<Proxy>): Promise<Proxy | undefined> {
+    if (!db) return undefined;
+    const rows = await db.update(proxies).set(updates as any).where(eq(proxies.id, id)).returning();
+    return rows[0];
+  }
+
+  async deleteProxy(id: string): Promise<boolean> {
+    if (!db) return false;
+    const rows = await db.delete(proxies).where(eq(proxies.id, id)).returning();
+    return rows.length > 0;
+  }
+
+  async clearProxies(): Promise<void> {
+    if (!db) return;
+    await db.delete(proxies);
+  }
+
+  // Screen sessions
+  async getScreenSessions(): Promise<ScreenSession[]> {
+    if (!db) return [];
+    return await db.select().from(screenSessions).orderBy(desc(screenSessions.createdAt));
+  }
+
+  async getScreenSessionById(id: string): Promise<ScreenSession | undefined> {
+    if (!db) return undefined;
+    const rows = await db.select().from(screenSessions).where(eq(screenSessions.id, id));
+    return rows[0];
+  }
+
+  async getScreenSession(screenNumber: number): Promise<ScreenSession | undefined> {
+    if (!db) return undefined;
+    const rows = await db.select().from(screenSessions).where(eq(screenSessions.screenNumber, screenNumber));
+    return rows[0];
+  }
+
+  async createScreenSession(insertSession: InsertScreenSession): Promise<ScreenSession> {
+    if (!db) throw new Error('DB not configured');
+    // Upsert-by-screenNumber behavior: update if exists, else insert
+    const existing = await this.getScreenSession(insertSession.screenNumber);
+    if (existing) {
+      const updates: Partial<ScreenSession> = {
+        ...insertSession,
+        id: existing.id,
+        lastRefresh: new Date(),
+      } as any;
+      const rows = await db.update(screenSessions).set(updates as any).where(eq(screenSessions.id, existing.id)).returning();
+      return rows[0];
+    }
+    const row = {
+      ...insertSession,
+      id: randomUUID(),
+      proxyId: insertSession.proxyId ?? null,
+      refreshInterval: insertSession.refreshInterval ?? 30,
+      isActive: (insertSession as any).isActive ?? true,
+      friendly: (insertSession as any).friendly ?? true,
+      createdAt: new Date(),
+      lastRefresh: new Date(),
+    } as any;
+    const rows = await db.insert(screenSessions).values(row).returning();
+    return rows[0];
+  }
+
+  async updateScreenSession(id: string, updates: Partial<ScreenSession>): Promise<ScreenSession | undefined> {
+    if (!db) return undefined;
+    const rows = await db.update(screenSessions).set(updates as any).where(eq(screenSessions.id, id)).returning();
+    return rows[0];
+  }
+
+  async deleteScreenSession(id: string): Promise<boolean> {
+    if (!db) return false;
+    const rows = await db.delete(screenSessions).where(eq(screenSessions.id, id)).returning();
+    return rows.length > 0;
+  }
+
+  async clearScreenSessions(): Promise<void> {
+    if (!db) return;
+    await db.delete(screenSessions);
+  }
+}
+
+export const storage: IStorage = db ? new DbStorage() : new MemStorage();

@@ -2,20 +2,29 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
+// Set a sensible default for NODE_ENV when not provided by the shell
+// - If running the built file from dist/, assume production
+// - Otherwise, assume development (tsx/dev server)
+if (!process.env.NODE_ENV) {
+  const scriptPath = process.argv[1] || "";
+  process.env.NODE_ENV = scriptPath.includes("dist") ? "production" : "development";
+}
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   const path = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  const originalResJson = res.json.bind(res) as (body?: any) => Response;
+  // Override res.json to capture the response body while keeping Express's signature
+  res.json = (function (bodyJson?: any): Response {
+    capturedJsonResponse = bodyJson as any;
+    return originalResJson(bodyJson);
+  }) as Response['json'];
 
   res.on("finish", () => {
     const duration = Date.now() - start;

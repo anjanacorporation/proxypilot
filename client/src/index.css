@@ -97,8 +97,13 @@
     @apply border-border;
   }
 
+  html, body, #root {
+    height: 100%;
+  }
+
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    /* Force dark background to avoid white banding at bottom */
+    @apply font-sans antialiased bg-dark-900 text-white;
   }
 }
 

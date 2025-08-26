@@ -122,8 +122,6 @@ export default function Sidebar({ onClose }: SidebarProps = {}) {
         throw new Error('Failed to create any screens (timeouts or errors).');
       }
     },
-    retry: 1,
-    retryDelay: (attempt) => 1500 * attempt,
     onSuccess: () => {
       setIsRunning(true);
       queryClient.invalidateQueries({ queryKey: ["/api/screen-sessions"] });
@@ -134,22 +132,21 @@ export default function Sidebar({ onClose }: SidebarProps = {}) {
       });
     },
     onError: (error: any) => {
-      // Ensure the UI does not remain in a stuck "running" state after an error
-      setIsRunning(false);
       toast({
         title: "Error",
         description: error.message || "Failed to start proxy grid",
         variant: "destructive",
       });
     },
-    onSettled: () => {
-      // Ensure UI state reflects reality (non-blocking)
-      fetch('/api/screen-sessions', { credentials: 'include' })
-        .then(res => res.ok ? res.json() : null)
-        .then(sessions => {
-          if (sessions) setIsRunning(Array.isArray(sessions) && sessions.length > 0);
-        })
-        .catch(() => {/* ignore */});
+    onSettled: async () => {
+      // Ensure UI state reflects reality
+      try {
+        const res = await fetch('/api/screen-sessions', { credentials: 'include' });
+        if (res.ok) {
+          const sessions = await res.json();
+          setIsRunning(Array.isArray(sessions) && sessions.length > 0);
+        }
+      } catch {}
     }
   });
 
@@ -207,7 +204,6 @@ export default function Sidebar({ onClose }: SidebarProps = {}) {
   });
 
   const handleStart = () => {
-    if (startProxyMutation.isPending) return; // prevent concurrent starts
     startProxyMutation.mutate();
   };
 
@@ -336,7 +332,7 @@ export default function Sidebar({ onClose }: SidebarProps = {}) {
             data-testid="button-start-proxy"
           >
             <Play className="w-4 h-4 mr-2" />
-            {startProxyMutation.isPending ? "Starting..." : (startProxyMutation.isError ? "Retry Start" : "Start Proxy Grid")}
+            {startProxyMutation.isPending ? "Starting..." : "Start Proxy Grid"}
           </Button>
           
           <Button

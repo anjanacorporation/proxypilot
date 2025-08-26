@@ -216,11 +216,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Proxy endpoint for fetching web content through proxies (with in-request rotation)
   app.get("/api/proxy-fetch", async (req, res) => {
     const { url, proxyId, sessionId } = req.query as { url?: string; proxyId?: string; sessionId?: string };
-    if (!url) {
-      return res.status(400).json({ message: "url is required" });
-    }
-    if (!sessionId && !proxyId) {
-      return res.status(400).json({ message: "sessionId or proxyId is required" });
+    if (!url || !proxyId) {
+      return res.status(400).json({ message: "URL and proxyId are required" });
     }
 
     // Ensure URL has protocol
@@ -239,32 +236,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Build a queue of proxies to try: requested one first, then other working ones
     const tried = new Set<string>();
-    const maxAttempts = 5;
+    const maxAttempts = 3;
 
     // Restrict to proxies likely to be HTTP and same country as the original when possible
     const allowedPorts = new Set([80, 8080, 8081, 8082, 8000, 8888, 3128, 8118, 8811]);
     const tier1 = new Set(['usa', 'canada', 'australia', 'uk', 'germany', 'france', 'netherlands']);
-    const getBaseProxy = async () => {
-      // Prefer session->proxyId from DB; fall back to query proxyId for backward compatibility
-      if (sessionId) {
-        const sess = await storage.getScreenSessionById(sessionId as string);
-        if (sess?.proxyId) {
-          const p = await storage.getProxyById(sess.proxyId);
-          if (p) return p;
-        }
-      }
-      if (proxyId) {
-        const p = await storage.getProxyById(proxyId as string);
-        if (p) return p;
-      }
-      return null;
-    };
+    const getBaseProxy = async () => await storage.getProxyById(proxyId as string);
 
     const pickNextProxy = async () => {
-      // Prefer the currently pinned session proxy (DB) or provided proxyId first
-      const base = await getBaseProxy();
-      if (base && !tried.has(base.id)) {
-        return base;
+      // Prefer the requested proxy first
+      if (!tried.has(proxyId as string)) {
+        const p = await storage.getProxyById(proxyId as string);
+        if (p) return p;
+        tried.add(proxyId as string);
       }
       // If sessionId present: try pinned, then rotate within same country
       let targetCountry: string | undefined;
@@ -280,24 +264,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Then any other working proxy not yet tried (prefer same country)
       const working = await storage.getWorkingProxies();
-      const baseProxy = base;
-      // Prefer proxies recently checked to increase success odds
-      const now = Date.now();
-      const freshCutoff = now - 2 * 60 * 1000; // 2 minutes
-      let candidates = working
-        .filter(p => !tried.has(p.id) && allowedPorts.has(p.port))
-        .sort((a, b) => {
-          const at = new Date(a.lastChecked as any).getTime();
-          const bt = new Date(b.lastChecked as any).getTime();
-          const aFresh = at >= freshCutoff ? 1 : 0;
-          const bFresh = bt >= freshCutoff ? 1 : 0;
-          if (aFresh !== bFresh) return bFresh - aFresh; // fresher first
-          // then faster response time first (lower is better)
-          const art = (a.responseTime ?? 999999);
-          const brt = (b.responseTime ?? 999999);
-          return art - brt;
-        });
-      const countryToMatch = (targetCountry || baseProxy?.country);
+      const base = await getBaseProxy();
+      let candidates = working.filter(p => !tried.has(p.id) && allowedPorts.has(p.port));
+      const countryToMatch = (targetCountry || base?.country);
       if (countryToMatch && tier1.has(countryToMatch)) {
         candidates = candidates.filter(p => p.country === countryToMatch);
       } else if (countryToMatch) {
@@ -323,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const startedAt = Date.now();
         const response = await axios.get(targetUrl, {
           proxy: false,
-          timeout: 10000,
+          timeout: 8000,
           maxRedirects: 5,
           validateStatus: () => true,
           headers: {
@@ -336,19 +305,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...agentOpts,
         });
 
-        // If upstream returns 5xx, rotate to another proxy; pass through 4xx to iframe
-        if (response.status >= 500) {
-          // server-side failure at target; try next proxy
+        // If upstream rejects (4xx/5xx), try rotating to another proxy
+        if (response.status >= 400) {
+          // Do NOT mark as not working for 4xx (site policy); continue to next
           continue;
         }
 
-        // Success (including 4xx): proxy tunnel is functional; record metrics
+        // Success: mark proxy as working and record metrics
         try {
           const rt = Math.max(1, Date.now() - startedAt);
           await storage.updateProxy(proxy.id, { isWorking: true, lastChecked: new Date(), responseTime: rt });
           await proxyService.noteSuccess(proxy.id);
-          // Log which DB proxy IP served this iframe load
-          console.log(`[proxy-fetch] SUCCESS sessionId=${sessionId || '-'} country=${proxy.country} proxyId=${proxy.id} ip=${proxy.ip} rt=${rt}ms url=${targetUrl}`);
         } catch { /* ignore metric update errors */ }
 
         // Success: if sessionId provided, unify all active sessions in same country to this proxy
@@ -382,13 +349,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return res.status(response.status || 200).send(htmlContent);
       } catch (error: any) {
-        console.error('[proxy-fetch] ERROR', {
-          sessionId,
-          proxyId: proxy?.id,
-          country: proxy?.country,
-          ip: proxy?.ip,
-          error: error?.message || String(error)
-        });
+        console.error('Proxy fetch error:', error?.message || error);
         // Mark this proxy as not working, continue to next
         try {
           await storage.updateProxy(proxy.id, { isWorking: false, lastChecked: new Date() });

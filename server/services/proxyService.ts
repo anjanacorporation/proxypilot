@@ -92,18 +92,53 @@ export class ProxyService {
       // Clear existing proxies
       await storage.clearProxies();
 
-      // Add proxies without validation initially (validate in background)
-      let addedProxies = 0;
-      for (const scrapedProxy of scrapedProxies.slice(0, 1_000_000)) { // Raise cap to 1,000,000
-        const insertProxy = this.scraper.convertToInsertProxy(scrapedProxy);
-        await storage.createProxy(insertProxy);
-        addedProxies++;
+      // Save ONLY working proxies: verify first, then insert
+      let tested = 0;
+      let workingAdded = 0;
+      const maxToProcess = 1_000_000; // safety cap
+      const batchSize = 200; // verify in batches to avoid overwhelming
+      for (let i = 0; i < Math.min(scrapedProxies.length, maxToProcess); i += batchSize) {
+        const batch = scrapedProxies.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (scraped) => {
+          tested++;
+          const insertProxy = this.scraper.convertToInsertProxy(scraped);
+          // Quick HTTPS-only health check
+          const temp: Proxy = {
+            id: 'temp',
+            ip: insertProxy.ip,
+            port: insertProxy.port,
+            country: insertProxy.country || 'unknown',
+            isWorking: false,
+            lastChecked: new Date(),
+            responseTime: null,
+            createdAt: new Date(),
+          } as any;
+          const { ok, rt } = await this.healthCheckViaProxy(temp, 8000);
+          if (!ok) return; // skip non-working
+          // Optional geo enrichment for unknown country
+          let country = insertProxy.country || 'unknown';
+          if (!country || country === 'unknown') {
+            try {
+              const c = await this.scraper.geolocate(insertProxy.ip);
+              if (c && c !== 'unknown') country = c as any;
+            } catch {/* ignore */}
+          }
+          await storage.createProxy({
+            ...insertProxy,
+            country,
+            isWorking: true,
+            responseTime: rt ?? null,
+            lastChecked: new Date(),
+          });
+          workingAdded++;
+        }));
+        // small pause between batches
+        await new Promise(r => setTimeout(r, 200));
       }
 
-      console.log(`Added ${addedProxies} proxies (starting background validation)`);
-      // Kick off background validation right after update
-      this.verifyAllProxies().catch(() => {/* noop */});
-      // Start slow geo enrichment in background as well
+      console.log(`Verification complete. Tested: ${tested}, Working saved: ${workingAdded}`);
+      // No need to run immediate verifyAllProxies; DB now contains only working ones
+      // Background slow geo enrichment remains useful for any 'unknown' left
       this.geolocateUnknownProxies().catch(() => {/* noop */});
 
     } catch (error) {

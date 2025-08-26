@@ -158,7 +158,7 @@ export default function ScreenCard({ session, viewMode }: ScreenCardProps) {
           {/* Mobile scale wrapper to mimic desktop layout and reduce text size */}
           <div className="transform origin-top-left scale-[0.85] sm:scale-100 w-[118%] sm:w-full">
             <iframe
-              src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&sessionId=${session.id}`}
+              src={`/api/proxy-fetch?url=${encodeURIComponent(session.targetUrl)}&proxyId=${session.proxyId}&sessionId=${session.id}`}
               className="w-full h-[28vh] sm:h-[24vh] md:h-[20vh] xl:h-[25vh]"
               title={`Screen ${session.screenNumber}`}
               sandbox="allow-same-origin allow-scripts"

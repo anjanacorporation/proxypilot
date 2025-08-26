@@ -4,9 +4,7 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
-# Environment files
-.env
-.env.*
 
-# Generated geo cache
+# Server secrets and cache
+server/.env
 server/services/geoCache.json

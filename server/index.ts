@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -9,23 +8,6 @@ import { setupVite, serveStatic, log } from "./vite";
 if (!process.env.NODE_ENV) {
   const scriptPath = process.argv[1] || "";
   process.env.NODE_ENV = scriptPath.includes("dist") ? "production" : "development";
-}
-
-// Briefly log DB configuration presence (mask secret). This helps diagnose env issues.
-try {
-  const raw = process.env.DATABASE_URL || "";
-  if (raw) {
-    // Normalize scheme for URL parser if needed
-    const normalized = raw.replace(/^postgresql:/, "postgres:");
-    const u = new URL(normalized);
-    const user = u.username || "(none)";
-    const host = u.hostname || "(unknown)";
-    log(`[db] DATABASE_URL detected: user=${user} host=${host} ssl=${u.searchParams.get('sslmode') || 'n/a'}`);
-  } else {
-    log(`[db] DATABASE_URL not set. Using in-memory storage.`);
-  }
-} catch {
-  log(`[db] DATABASE_URL appears malformed. Using as-is.`);
 }
 
 const app = express();

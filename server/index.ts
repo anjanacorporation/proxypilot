@@ -11,6 +11,23 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = scriptPath.includes("dist") ? "production" : "development";
 }
 
+// Briefly log DB configuration presence (mask secret). This helps diagnose env issues.
+try {
+  const raw = process.env.DATABASE_URL || "";
+  if (raw) {
+    // Normalize scheme for URL parser if needed
+    const normalized = raw.replace(/^postgresql:/, "postgres:");
+    const u = new URL(normalized);
+    const user = u.username || "(none)";
+    const host = u.hostname || "(unknown)";
+    log(`[db] DATABASE_URL detected: user=${user} host=${host} ssl=${u.searchParams.get('sslmode') || 'n/a'}`);
+  } else {
+    log(`[db] DATABASE_URL not set. Using in-memory storage.`);
+  }
+} catch {
+  log(`[db] DATABASE_URL appears malformed. Using as-is.`);
+}
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
